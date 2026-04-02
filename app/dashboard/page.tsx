@@ -65,7 +65,7 @@ function LandlordDashboard() {
       <DashCard title="My Properties" emoji="🏠" description="Add and manage your properties" href="/properties" />
       <DashCard title="Browse Co-Hosts" emoji="🔍" description="Find and hire co-hosts for your needs" href="/cohosts" />
       <DashCard title="My Jobs" emoji="📋" description="Track your active and past jobs" href="/jobs" />
-      <DashCard title="Credits" emoji="💳" description="Top up and manage your balance" href="/credits" />
+      <DashCard title="Payments" emoji="💳" description="View payment history and escrow" href="/credits" />
       <DashCard title="Messages" emoji="💬" description="Chat with your co-hosts" href="/messages" />
       <DashCard title="Profile" emoji="👤" description="Update your landlord profile" href="/profile" />
     </div>
@@ -78,7 +78,7 @@ function CoHostDashboard() {
       <DashCard title="My Services" emoji="⚙️" description="Set your services and pricing" href="/services" />
       <DashCard title="Available Jobs" emoji="🔍" description="Browse jobs from landlords" href="/jobs" />
       <DashCard title="My Jobs" emoji="📋" description="Track your active and past jobs" href="/jobs/mine" />
-      <DashCard title="Earnings" emoji="💰" description="View your payouts and history" href="/earnings" />
+      <DashCard title="Payments" emoji="💰" description="View your payouts and earnings" href="/credits" />
       <DashCard title="Messages" emoji="💬" description="Chat with landlords" href="/messages" />
       <DashCard title="Profile" emoji="👤" description="Update your co-host profile" href="/profile" />
     </div>

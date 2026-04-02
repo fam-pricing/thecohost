@@ -8,7 +8,7 @@ function NewJobForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const supabase = createClient()
-  
+
   const preselectedCohost = searchParams.get("cohost") ?? ""
   const preselectedService = searchParams.get("service") ?? ""
 
@@ -17,7 +17,6 @@ function NewJobForm() {
   const [services, setServices] = useState<any[]>([])
   const [properties, setProperties] = useState<any[]>([])
   const [landlordProfileId, setLandlordProfileId] = useState<string | null>(null)
-  const [creditBalance, setCreditBalance] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
@@ -25,29 +24,32 @@ function NewJobForm() {
   const [form, setForm] = useState({
     service_category_id: preselectedService,
     property_id: "",
-    title: "",
     description: "",
     scheduled_date: "",
     scheduled_time: "",
   })
 
   const selectedService = services.find(s => s.category_id === form.service_category_id)
-  const platformFee = selectedService ? Math.round(selectedService.price * 0.10) : 0
-  const total = selectedService ? selectedService.price : 0
-  const payout = total - platformFee
+  const servicePrice = selectedService ? selectedService.price : 0
+  const platformFee = selectedService ? Math.round(servicePrice * 0.10) : 0
+  const cohostPayout = servicePrice - platformFee
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push("/login"); return }
 
-      const { data: lp } = await supabase.from("landlord_profiles").select("id, credit_balance").eq("user_id", user.id).single()
+      const { data: lp } = await supabase
+        .from("landlord_profiles")
+        .select("id")
+        .eq("user_id", user.id)
+        .single()
       if (!lp) { router.push("/onboarding"); return }
       setLandlordProfileId(lp.id)
-      setCreditBalance(lp.credit_balance ?? 0)
 
       const [{ data: cp }, { data: props }] = await Promise.all([
-        supabase.from("cohost_profiles")
+        supabase
+          .from("cohost_profiles")
           .select("cohost_services(id, price, is_active, category_id, service_categories(id, name, icon, requires_property)), profiles!inner(full_name)")
           .eq("id", cohostId)
           .single(),
@@ -75,12 +77,6 @@ function NewJobForm() {
     setSubmitting(true)
     setError("")
 
-    if (creditBalance < total) {
-      setError(`Insufficient credits. You need AED ${total} but have AED ${creditBalance}. Top up first.`)
-      setSubmitting(false)
-      return
-    }
-
     const needsProperty = selectedService.service_categories?.requires_property
     if (needsProperty && !form.property_id) {
       setError("Please select a property for this service.")
@@ -89,20 +85,24 @@ function NewJobForm() {
     }
 
     const cat = selectedService.service_categories
-    const { data: job, error: jobErr } = await supabase.from("jobs").insert({
-      landlord_id: landlordProfileId,
-      cohost_id: cohostId,
-      property_id: form.property_id || null,
-      service_category_id: form.service_category_id,
-      title: form.title || `${cat?.name} — ${cohostName}`,
-      description: form.description,
-      scheduled_date: form.scheduled_date || null,
-      scheduled_time: form.scheduled_time || null,
-      price: total,
-      platform_fee: platformFee,
-      cohost_payout: payout,
-      status: "pending",
-    }).select().single()
+    const { data: job, error: jobErr } = await supabase
+      .from("jobs")
+      .insert({
+        landlord_id: landlordProfileId,
+        cohost_id: cohostId,
+        property_id: form.property_id || null,
+        service_category_id: form.service_category_id,
+        title: `${cat?.name} — ${cohostName}`,
+        description: form.description,
+        scheduled_date: form.scheduled_date || null,
+        scheduled_time: form.scheduled_time || null,
+        price: servicePrice,
+        platform_fee: platformFee,
+        cohost_payout: cohostPayout,
+        status: "pending",
+      })
+      .select()
+      .single()
 
     if (jobErr || !job) {
       setError(jobErr?.message ?? "Failed to create job.")
@@ -110,16 +110,14 @@ function NewJobForm() {
       return
     }
 
-    // Escrow credits
+    // Record the escrow transaction (payment gateway will be wired here later)
     await supabase.from("credit_transactions").insert({
       landlord_id: landlordProfileId,
       job_id: job.id,
       transaction_type: "escrow",
-      amount: -total,
-      balance_after: creditBalance - total,
-      description: `Escrow for job: ${job.title}`,
+      amount: servicePrice,
+      description: `Payment escrowed for: ${job.title}`,
     })
-    await supabase.from("landlord_profiles").update({ credit_balance: creditBalance - total }).eq("id", landlordProfileId)
 
     router.push(`/jobs/${job.id}?created=1`)
   }
@@ -128,10 +126,13 @@ function NewJobForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+
+      {/* Co-host info banner */}
       <div className="bg-teal-50 border border-teal-100 rounded-xl px-4 py-3 text-sm text-teal-800">
-        Hiring: <strong>{cohostName}</strong> · Your balance: <strong>AED {creditBalance.toLocaleString()}</strong>
+        Sending job offer to: <strong>{cohostName}</strong>
       </div>
 
+      {/* Service selector */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Select service *</label>
         <div className="space-y-2">
@@ -161,11 +162,16 @@ function NewJobForm() {
         </div>
       </div>
 
+      {/* Property selector (only when required) */}
       {selectedService?.service_categories?.requires_property && (
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Property *</label>
-          <select required value={form.property_id} onChange={e => setForm(p => ({...p, property_id: e.target.value}))}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900">
+          <select
+            required
+            value={form.property_id}
+            onChange={e => setForm(p => ({ ...p, property_id: e.target.value }))}
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900"
+          >
             <option value="">Select a property</option>
             {properties.map(p => (
               <option key={p.id} value={p.id}>{p.name} — {p.area}</option>
@@ -174,46 +180,87 @@ function NewJobForm() {
         </div>
       )}
 
+      {/* Date & time */}
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>
-          <input type="date" value={form.scheduled_date} onChange={e => setForm(p => ({...p, scheduled_date: e.target.value}))}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900" />
+          <input
+            type="date"
+            value={form.scheduled_date}
+            onChange={e => setForm(p => ({ ...p, scheduled_date: e.target.value }))}
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900"
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Time</label>
-          <input type="time" value={form.scheduled_time} onChange={e => setForm(p => ({...p, scheduled_time: e.target.value}))}
-            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900" />
+          <input
+            type="time"
+            value={form.scheduled_time}
+            onChange={e => setForm(p => ({ ...p, scheduled_time: e.target.value }))}
+            className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900"
+          />
         </div>
       </div>
 
+      {/* Notes */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Notes for co-host</label>
-        <textarea value={form.description} onChange={e => setForm(p => ({...p, description: e.target.value}))}
-          rows={3} placeholder="Any special instructions or details..."
-          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900 resize-none" />
+        <textarea
+          value={form.description}
+          onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+          rows={3}
+          placeholder="Any special instructions or details..."
+          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none text-gray-900 resize-none"
+        />
       </div>
 
+      {/* Price breakdown */}
       {selectedService && (
-        <div className="bg-gray-50 rounded-xl p-4 space-y-1 text-sm">
-          <div className="flex justify-between"><span className="text-gray-500">Service fee</span><span className="text-gray-900">AED {total.toLocaleString()}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Platform fee (10%)</span><span className="text-gray-900">AED {platformFee.toLocaleString()}</span></div>
-          <div className="flex justify-between"><span className="text-gray-500">Co-host receives</span><span className="text-gray-900">AED {payout.toLocaleString()}</span></div>
-          <div className="border-t border-gray-200 pt-2 flex justify-between font-semibold"><span>Total (from credits)</span><span>AED {total.toLocaleString()}</span></div>
+        <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Service fee</span>
+            <span className="text-gray-900 font-medium">AED {servicePrice.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-400">Platform fee (10%)</span>
+            <span className="text-gray-400">AED {platformFee.toLocaleString()}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-gray-400">Co-host receives</span>
+            <span className="text-gray-400">AED {cohostPayout.toLocaleString()}</span>
+          </div>
+          <div className="border-t border-gray-200 pt-2 flex justify-between font-semibold text-base">
+            <span className="text-gray-900">You pay</span>
+            <span style={{ color: "#0F6E56" }}>AED {servicePrice.toLocaleString()}</span>
+          </div>
         </div>
       )}
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl px-4 py-3 text-sm">{error}</div>}
+      {/* Payment gateway notice */}
+      {selectedService && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 text-sm text-amber-800">
+          <span className="text-lg leading-none mt-0.5">🔒</span>
+          <div>
+            <div className="font-medium">Payment held in escrow</div>
+            <div className="text-xs text-amber-600 mt-0.5">
+              AED {servicePrice.toLocaleString()} will be charged when you confirm. Funds are released to the co-host only after job completion. Payment gateway coming soon.
+            </div>
+          </div>
+        </div>
+      )}
 
-      <button type="submit" disabled={submitting || !selectedService}
-        className="w-full py-3 rounded-xl text-white font-semibold disabled:opacity-60"
-        style={{ backgroundColor: "#0F6E56" }}>
-        {submitting ? "Sending offer..." : "Send Job Offer"}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-600 rounded-xl px-4 py-3 text-sm">{error}</div>
+      )}
+
+      <button
+        type="submit"
+        disabled={submitting || !selectedService}
+        className="w-full py-3.5 rounded-xl text-white font-semibold disabled:opacity-50 transition-opacity"
+        style={{ backgroundColor: "#0F6E56" }}
+      >
+        {submitting ? "Sending offer..." : selectedService ? `Confirm & Send Offer — AED ${servicePrice.toLocaleString()}` : "Select a service to continue"}
       </button>
-
-      <p className="text-xs text-center text-gray-400">
-        Credits are held in escrow until the job is completed. You can cancel before the co-host accepts.
-      </p>
     </form>
   )
 }
@@ -224,12 +271,12 @@ export default function NewJobPage() {
       <nav className="bg-white border-b border-gray-100 px-6 py-4">
         <div className="max-w-2xl mx-auto flex items-center justify-between">
           <a href="/dashboard" className="text-xl font-bold" style={{ color: "#0F6E56" }}>The Co-Host</a>
-          <a href="/cohosts" className="text-sm text-gray-500 hover:text-gray-700">← Back</a>
+          <a href="/cohosts" className="text-sm text-gray-500 hover:text-gray-700">← Browse co-hosts</a>
         </div>
       </nav>
       <div className="max-w-2xl mx-auto px-6 py-10">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Post a Job</h1>
-        <p className="text-gray-500 mb-8">Send a job offer to your selected co-host. Credits are escrowed until completion.</p>
+        <p className="text-gray-500 mb-8">Select a service, set a date, and send your offer. Payment is held in escrow until the job is completed.</p>
         <div className="bg-white rounded-2xl border border-gray-100 p-6">
           <Suspense fallback={<div className="text-center py-10 text-gray-400">Loading...</div>}>
             <NewJobForm />

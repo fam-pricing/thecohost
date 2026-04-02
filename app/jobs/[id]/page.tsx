@@ -86,7 +86,7 @@ export default async function JobDetailPage({
             <span className="text-2xl">🎉</span>
             <div>
               <div className="font-semibold text-teal-800">Job offer sent!</div>
-              <div className="text-sm text-teal-600">Credits have been escrowed. The co-host will be notified.</div>
+              <div className="text-sm text-teal-600">Payment is held in escrow. The co-host will be notified.</div>
             </div>
           </div>
         )}
@@ -152,6 +152,7 @@ export default async function JobDetailPage({
           landlordId={userLandlordId ?? ""}
           cohostId={userCohostId ?? ""}
           cohostPayout={job.cohost_payout}
+          servicePrice={job.price}
           otherPartyId={isLandlord ? (cohostProfile?.id ?? "") : (landlordProfile?.id ?? "")}
         />
       </div>
